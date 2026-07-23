@@ -45,6 +45,7 @@ public:
     }
 
 private:
+    // v1 用 IP:端口作为临时会话键；重连和 NAT 变化会获得新 ID，尚无账号或迁移逻辑。
     std::unordered_map<std::string, std::uint32_t> client_ids_;
     std::uint32_t next_client_id_ = 1;
 };
@@ -120,6 +121,7 @@ void send_packet(
     bored::protocol::MessageType message_type,
     std::uint32_t& server_sequence,
     std::span<const std::uint8_t> payload) {
+    // 服务端序号独立于客户端序号，便于以后分别分析上下行丢包和乱序。
     const auto response = bored::protocol::encode_packet(message_type, server_sequence++, payload);
     std::string error;
     if (!socket.send_to(endpoint, response, error)) {
@@ -131,6 +133,7 @@ void process_network(
     bored::UdpSocket& socket,
     ClientRegistry& clients,
     std::uint32_t& server_sequence) {
+    // 单 Tick 限额防止网络突发独占模拟预算；剩余数据报留给下一 Tick 处理。
     constexpr int max_datagrams_per_tick = 32;
 
     for (int index = 0; index < max_datagrams_per_tick; ++index) {
@@ -154,6 +157,7 @@ void process_network(
             }
 
             const ClientAssignment assignment = clients.assign(datagram->sender.label);
+            // 回显 nonce 让客户端确认该响应属于本次握手，而非旧 UDP 包。
             const auto response_payload = bored::protocol::encode_hello_ack_payload(*nonce, assignment.id);
             send_packet(
                 socket,
@@ -201,6 +205,7 @@ int main(int argc, char* argv[]) {
         }
 
         ClientRegistry clients;
+        // 发送序号按方向独立递增，v1 不要求与收到包的序号对应。
         std::uint32_t server_sequence = 1;
         tick_clock.start(bored::FixedTickClock::Clock::now());
 

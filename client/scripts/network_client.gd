@@ -29,12 +29,14 @@ var _handshake_complete := false
 
 func start() -> void:
 	_socket.close()
+	# 绑定临时本地端口；服务端根据这个端口回复同一条 UDP 会话。
 	var bind_error := _socket.bind(0)
 	if bind_error != OK:
 		status_changed.emit("Server: UDP bind failed (%s)" % error_string(bind_error))
 		return
 
 	_socket.connect_to_host(server_host, server_port)
+	# nonce 用于把当前连接尝试与延迟到达的旧 HelloAck 区分开。
 	_hello_nonce = int(Time.get_ticks_usec() % 4_294_967_295)
 	status_changed.emit("Server: connecting to %s:%d" % [server_host, server_port])
 	_send_hello()
@@ -47,6 +49,7 @@ func _process(delta: float) -> void:
 		return
 
 	if not _handshake_complete:
+		# UDP 不保证到达，因此握手完成前周期性重发 Hello。
 		_hello_elapsed += delta
 		if _hello_elapsed >= 1.0:
 			_send_hello()
@@ -87,6 +90,7 @@ func _send_packet(message_type: MessageType, payload: PackedByteArray) -> void:
 	_append_u32(packet, _next_sequence)
 	_append_u16(packet, payload.size())
 	packet.append_array(payload)
+	# 上行序号只标记本客户端发送顺序；v1 不会据此重传或确认。
 	_next_sequence += 1
 
 	var send_error := _socket.put_packet(packet)
@@ -110,6 +114,7 @@ func _handle_packet(packet: PackedByteArray) -> void:
 
 	var message_type := packet[3]
 	var payload_length := _read_u16(packet, 8)
+	# 长度精确匹配后才读取消息体，避免畸形 UDP 包进入业务状态机。
 	if packet.size() != HEADER_SIZE + payload_length:
 		return
 
@@ -137,6 +142,7 @@ func _handle_pong(packet: PackedByteArray, payload_length: int) -> void:
 		return
 
 	var sent_at_usec := _read_u64(packet, HEADER_SIZE)
+	# Pong 回显的是客户端原始时间戳，因此不依赖客户端与服务端时钟同步。
 	var rtt_ms := float(Time.get_ticks_usec() - sent_at_usec) / 1_000.0
 	if rtt_ms >= 0.0:
 		rtt_updated.emit(rtt_ms)

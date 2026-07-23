@@ -70,6 +70,7 @@ bool UdpSocket::open(std::uint16_t port, std::string& error) {
     close();
 
 #ifdef _WIN32
+    // Winsock 必须在创建 Windows socket 前初始化，且每次 open/close 成对管理。
     WSADATA winsock_data{};
     if (WSAStartup(MAKEWORD(2, 2), &winsock_data) != 0) {
         error = socket_error();
@@ -101,6 +102,7 @@ bool UdpSocket::open(std::uint16_t port, std::string& error) {
     }
 
 #ifdef _WIN32
+    // 传输层绝不能等待网络数据，否则一个慢客户端会卡住整个模拟线程。
     u_long non_blocking = 1;
     if (ioctlsocket(native_socket, FIONBIO, &non_blocking) != 0) {
         error = socket_error();
@@ -151,7 +153,7 @@ std::optional<UdpDatagram> UdpSocket::receive() {
 #endif
     if (received < 0) {
         if (!is_would_block_error()) {
-            // 当前阶段只把异常数据报视为丢包；网络错误统计会在后续诊断阶段补充。
+            // 当前阶段把瞬时网络错误视为丢包；错误计数将在诊断阶段加入。
         }
         return std::nullopt;
     }
