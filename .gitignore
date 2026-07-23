@@ -7,3 +7,4 @@ server/build/
 build/
 .vs/
 .vscode/
+*.log
