@@ -6,3 +6,4 @@ client/android/
 server/build/
 build/
 .vs/
+.vscode/
