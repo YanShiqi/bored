@@ -9,15 +9,16 @@ This repository contains separate client and server projects. `client/` is the G
 - `godot --editor --path client`: open the client in the Godot editor.
 - `godot --path client`: run the client locally.
 - `godot --headless --editor --path client --quit`: verify that client resources load.
-- `cmake -S server -B server/build`: configure the C++ server once sources exist.
-- `cmake --build server/build`: compile the configured server.
-- `ctest --test-dir server/build`: run registered C++ tests.
+- `cmake --preset windows-msvc-debug`: configure the C++ server with Visual Studio on Windows.
+- `cmake --build --preset windows-msvc-debug`: compile the Debug server.
+- `ctest --preset windows-msvc-debug --output-on-failure`: run registered C++ tests.
+- `cmake --preset linux-gcc-debug`: configure the same server in WSL/Linux.
 
 Use `godot4` instead of `godot` when required by the local installation.
 
 ## Coding Style & Naming Conventions
 
-Files are UTF-8 with LF endings. Use tabs for GDScript and the formatter selected by the future C++ toolchain (prefer four spaces and `clang-format`). Name GDScript files `snake_case.gd`, C++ types `PascalCase`, functions and variables `snake_case`, and tests after behavior, such as `movement_prediction_test.cpp`. Keep rendering and input in the client; gameplay authority and validation belong to the server.
+Files are UTF-8 with LF endings. Use tabs for GDScript and the formatter selected by the future C++ toolchain (prefer four spaces and `clang-format`). Name GDScript files `snake_case.gd`, C++ types `PascalCase`, functions and variables `snake_case`, and tests after behavior, such as `movement_prediction_test.cpp`. Keep rendering and input in the client; gameplay authority and validation belong to the server. Add concise Chinese comments where intent is non-obvious: tick timing, state transitions, protocol boundaries, concurrency, and compensation algorithms. Do not annotate self-evident assignments or control flow.
 
 ## Testing Guidelines
 

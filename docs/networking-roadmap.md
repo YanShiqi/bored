@@ -23,11 +23,11 @@ The client and server are separate programs but remain in one repository so prot
 
 ## Initial Protocol
 
-Start with a small explicit binary protocol over UDP. Every packet should include a protocol version, message type, and sequence or tick where relevant.
+The implemented v1 protocol is documented in [`../shared/protocol/protocol.md`](../shared/protocol/protocol.md). It uses a 10-byte fixed header with magic, version, message type, sender-local sequence, and payload length; all multi-byte fields are big-endian. `Hello`, `HelloAck`, `Ping`, and `Pong` provide the current observable handshake baseline.
 
 - `InputCommand`: player ID, input sequence, client tick, movement axes, buttons.
 - `WorldSnapshot`: server tick, acknowledged input sequence, and entity states.
-- `Ping`/`Pong`: timestamps used to estimate round-trip time and clock offset.
+- `Ping`/`Pong`: timestamps used to estimate round-trip time. Clock offset estimation is intentionally deferred.
 
 Business-style messages may later use Protocol Buffers. High-frequency snapshots should remain measurable and compact before adopting a more elaborate serialization layer.
 

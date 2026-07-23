@@ -1,0 +1,11 @@
+# Protocol v1 byte-level test vectors
+# Bytes are hexadecimal, in datagram order.
+
+# Hello: sequence=7, client_nonce=0x01020304
+42 4F 01 01 00 00 00 07 00 04 01 02 03 04
+
+# HelloAck: sequence=8, client_nonce=0x01020304, client_id=42
+42 4F 01 02 00 00 00 08 00 08 01 02 03 04 00 00 00 2A
+
+# Ping: sequence=9, sent_at_usec=1234567890123
+42 4F 01 03 00 00 00 09 00 08 00 00 01 1F 71 FB 04 CB

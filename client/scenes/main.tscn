@@ -1,3 +1,41 @@
-[gd_scene format=3 uid="uid://0pp6l12jxklr"]
+[gd_scene load_steps=3 format=3 uid="uid://0pp6l12jxklr"]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_ho6qf"]
+[ext_resource type="Script" path="res://scripts/network_client.gd" id="2_5pmhe"]
 
 [node name="Main" type="Node2D" unique_id=849922611]
+script = ExtResource("1_ho6qf")
+
+[node name="NetworkClient" type="Node" parent="."]
+script = ExtResource("2_5pmhe")
+
+[node name="StatusLayer" type="CanvasLayer" parent="."]
+
+[node name="StatusPanel" type="PanelContainer" parent="StatusLayer"]
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 336.0
+offset_bottom = 184.0
+
+[node name="MarginContainer" type="MarginContainer" parent="StatusLayer/StatusPanel"]
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 14
+
+[node name="StatusList" type="VBoxContainer" parent="StatusLayer/StatusPanel/MarginContainer"]
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="StatusLayer/StatusPanel/MarginContainer/StatusList"]
+theme_override_colors/font_color = Color(0.72, 0.88, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "Bored Network Lab"
+
+[node name="ServerStatus" type="Label" parent="StatusLayer/StatusPanel/MarginContainer/StatusList"]
+text = "Server: offline"
+
+[node name="RttStatus" type="Label" parent="StatusLayer/StatusPanel/MarginContainer/StatusList"]
+text = "RTT: waiting for connection"
+
+[node name="SimulationStatus" type="Label" parent="StatusLayer/StatusPanel/MarginContainer/StatusList"]
+text = "Simulation: 30 Hz target"

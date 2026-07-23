@@ -6,14 +6,15 @@
 
 ## 当前基线
 
-- `client/` 是已通过无界面编辑器加载验证的空白 Godot 4.7.1 2D 工程，启动场景为 `scenes/main.tscn`。
-- `server/`、`shared/protocol/` 和 `tools/` 已建立目录，但尚无实现。
-- 本机已有 CMake 4.2.1 和 Visual Studio 18 2026 C++ 工具链。
+- `client/` 是 Godot 4.7.1 2D 工程，启动场景为 `scenes/main.tscn`，显示本地实验状态和目标 Tick 频率。
+- `server/` 已有 C++20 CMake 工程、固定 Tick 时钟、UDP `Hello/HelloAck/Ping/Pong` 服务端和不依赖第三方框架的单元测试。
+- `shared/protocol/protocol.md` 已固定 v1 的 10 字节大端序包头和字节级测试向量。
+- 本机已验证 CMake 4.2.1、Visual Studio 18 2026 和 MSVC 19.51 工具链。
 - 当前没有数据库、账号系统、第三方网络库或测试框架。
 
 ## 已知问题
 
-- 受限自动化环境中，Godot 可以用 `--headless --editor` 加载项目，但直接无界面运行场景会在进入用户脚本前触发原生 `signal 11`。阶段 0 需要先在普通桌面环境通过 F6/F5 复现；如果桌面运行正常，则将其视为自动化环境兼容问题，不为此修改游戏逻辑。
+- 受限自动化环境直接无界面运行 Godot 场景可能在进入用户脚本前触发原生 `signal 11`；普通本机权限下的无界面编辑器加载已通过。该限制不影响当前客户端资源验证。
 
 ## 目录规划
 
@@ -53,13 +54,13 @@ docs/
 
 ## 开发阶段
 
-### 阶段 0：可构建基线
+### 阶段 0：可构建基线（已完成）
 
 建立 CMake 工程、服务端入口、固定 Tick 时钟和最小测试目标。客户端增加简单状态界面。
 
 验收：Debug 构建和测试通过；服务端持续运行，Tick 漂移和耗时可打印；Godot 客户端可启动。
 
-### 阶段 1：连接与协议
+### 阶段 1：连接与协议（已完成）
 
 定义包头、协议版本、消息类型、序号和长度校验，实现 `Hello`、`Ping`、`Pong`。Godot 使用底层 UDP API，服务端为客户端分配临时 ID。
 
@@ -95,12 +96,9 @@ docs/
 
 ## 当前下一步
 
-1. 在 Godot 桌面编辑器中运行 `main.tscn`，确认自动化环境中的原生崩溃是否可复现。
-2. 创建 `server/CMakeLists.txt` 和最小可执行程序。
-3. 实现使用单调时钟的 `30 Hz` 固定 Tick 循环及其测试。
-4. 编写 `shared/protocol/protocol.md`，先固定包头再写 UDP。
-5. 实现 C++ `Ping/Pong` 服务端和 Godot 网络客户端。
-6. 以双客户端连接作为第一个端到端里程碑。
+1. 定义带输入序号和客户端 Tick 的移动输入消息，并为其补充协议测试向量。
+2. 在服务端固定 Tick 中维护玩家位置，以低于模拟频率的独立频率发送世界快照。
+3. 在两个 Godot 客户端中显示权威位置，验证客户端不能直接改写服务端状态。
 
 ## 本机命令
 
@@ -108,9 +106,10 @@ docs/
 & "F:\godot\Godot_v4.7.1-stable_win64.exe" --editor --path client
 & "F:\godot\Godot_v4.7.1-stable_win64_console.exe" --headless --editor --path client --quit
 
-cmake -S server -B server/build -G "Visual Studio 18 2026" -A x64
-cmake --build server/build --config Debug
-ctest --test-dir server/build -C Debug --output-on-failure
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug
+ctest --preset windows-msvc-debug --output-on-failure
+.\server\build\msvc-debug\Debug\bored_server.exe --ticks 35
 ```
 
-服务端 CMake 文件创建前，后三条命令预期不可运行。
+阶段 0 和阶段 1 已在 MSVC 下完成配置、构建、测试和本机 UDP `Hello/Ping/Pong` 往返验证。
