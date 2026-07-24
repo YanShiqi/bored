@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cerrno>
+#include <cstddef>
 #include <cstring>
 
 #ifdef _WIN32
@@ -17,18 +18,6 @@
 
 namespace bored {
 namespace {
-
-#ifdef _WIN32
-using NativeSocket = SOCKET;
-constexpr NativeSocket k_invalid_socket = INVALID_SOCKET;
-#else
-using NativeSocket = int;
-constexpr NativeSocket k_invalid_socket = -1;
-#endif
-
-NativeSocket as_native_socket(std::uintptr_t socket) {
-    return static_cast<NativeSocket>(socket);
-}
 
 std::string socket_error() {
 #ifdef _WIN32
@@ -79,7 +68,7 @@ bool UdpSocket::open(std::uint16_t port, std::string& error) {
     winsock_started_ = true;
 #endif
 
-    const NativeSocket native_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    const auto native_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (native_socket == k_invalid_socket) {
         error = socket_error();
         close();
@@ -120,12 +109,12 @@ bool UdpSocket::open(std::uint16_t port, std::string& error) {
     }
 #endif
 
-    socket_ = static_cast<std::uintptr_t>(native_socket);
+    socket_ = native_socket;
     return true;
 }
 
 std::optional<UdpDatagram> UdpSocket::receive() {
-    if (socket_ == 0) {
+    if (socket_ == k_invalid_socket) {
         return std::nullopt;
     }
 
@@ -135,7 +124,7 @@ std::optional<UdpDatagram> UdpSocket::receive() {
 #ifdef _WIN32
     int sender_length = sizeof(sender_address);
     const int received = recvfrom(
-        as_native_socket(socket_),
+        socket_,
         reinterpret_cast<char*>(buffer.data()),
         static_cast<int>(buffer.size()),
         0,
@@ -144,7 +133,7 @@ std::optional<UdpDatagram> UdpSocket::receive() {
 #else
     socklen_t sender_length = sizeof(sender_address);
     const ssize_t received = recvfrom(
-        as_native_socket(socket_),
+        socket_,
         buffer.data(),
         buffer.size(),
         0,
@@ -170,14 +159,14 @@ bool UdpSocket::send_to(
     const UdpEndpoint& endpoint,
     std::span<const std::uint8_t> bytes,
     std::string& error) const {
-    if (socket_ == 0) {
+    if (socket_ == k_invalid_socket) {
         error = "UDP socket is not open";
         return false;
     }
 
 #ifdef _WIN32
     const int sent = sendto(
-        as_native_socket(socket_),
+        socket_,
         reinterpret_cast<const char*>(bytes.data()),
         static_cast<int>(bytes.size()),
         0,
@@ -185,14 +174,15 @@ bool UdpSocket::send_to(
         endpoint.address_length);
 #else
     const ssize_t sent = sendto(
-        as_native_socket(socket_),
+        socket_,
         bytes.data(),
         bytes.size(),
         0,
         reinterpret_cast<const sockaddr*>(&endpoint.address),
         endpoint.address_length);
 #endif
-    if (sent != static_cast<decltype(sent)>(bytes.size())) {
+    // sendto 的返回值是有符号类型；先处理错误值，再与无符号的字节数比较。
+    if (sent < 0 || static_cast<std::size_t>(sent) != bytes.size()) {
         error = socket_error();
         return false;
     }
@@ -201,13 +191,13 @@ bool UdpSocket::send_to(
 }
 
 void UdpSocket::close() {
-    if (socket_ != 0) {
+    if (socket_ != k_invalid_socket) {
 #ifdef _WIN32
-        closesocket(as_native_socket(socket_));
+        closesocket(socket_);
 #else
-        ::close(as_native_socket(socket_));
+        ::close(socket_);
 #endif
-        socket_ = 0;
+        socket_ = k_invalid_socket;
     }
 
 #ifdef _WIN32

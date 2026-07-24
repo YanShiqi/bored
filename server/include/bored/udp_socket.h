@@ -49,7 +49,16 @@ public:
     void close();
 
 private:
-    std::uintptr_t socket_ = 0;
+#ifdef _WIN32
+    using SocketHandle = SOCKET;
+    static constexpr SocketHandle k_invalid_socket = INVALID_SOCKET;
+#else
+    using SocketHandle = int;
+    static constexpr SocketHandle k_invalid_socket = -1;
+#endif
+
+    // 保留操作系统原生句柄类型，避免在 POSIX 文件描述符与无符号整数之间转换。
+    SocketHandle socket_ = k_invalid_socket;
     // Windows 的 socket 生命周期还需要配对 WSAStartup/WSACleanup，Linux 不需要这一步。
     bool winsock_started_ = false;
 };
