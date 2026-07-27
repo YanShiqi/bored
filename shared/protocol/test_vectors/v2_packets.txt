@@ -1,0 +1,11 @@
+# Protocol v2 byte-level test vectors
+# Bytes are hexadecimal, in datagram order.
+
+# Hello: sequence=7, client_nonce=0x01020304
+42 4F 02 01 00 00 00 07 00 04 01 02 03 04
+
+# InputCommand: sequence=9, client_tick=30, input_sequence=7, move_x=-1, move_y=1
+42 4F 02 05 00 00 00 09 00 0A 00 00 00 1E 00 00 00 07 FF 01
+
+# WorldSnapshot: sequence=10, server_tick=12, acknowledged_input_sequence=7, two entities
+42 4F 02 06 00 00 00 0A 00 22 00 00 00 0C 00 00 00 07 00 02 00 00 00 01 00 00 05 DC FF FF F8 30 00 00 00 02 FF FF FC 18 00 00 00 00

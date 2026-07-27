@@ -1,6 +1,6 @@
 # C++ Game Server
 
-The authoritative server provides a C++20 fixed-tick scheduling baseline plus a UDP `Hello`/`HelloAck`/`Ping`/`Pong` handshake. Player state and movement begin in phase 2.
+The authoritative server provides a C++20 fixed-tick scheduling baseline, a UDP handshake, and phase 2 server-authoritative movement. It accepts input intent and broadcasts fixed-point world snapshots; interpolation and prediction begin in phase 3.
 
 ## Windows Development
 
@@ -13,4 +13,4 @@ ctest --preset windows-msvc-debug --output-on-failure
 .\build\msvc-debug\Debug\bored_server.exe --ticks 35
 ```
 
-`--port <port>` selects the UDP port (default `39000`), `--tick-rate <hz>` changes the simulation rate (default `30`), and `--ticks <count>` ends a diagnostic run after a fixed number of ticks.
+`--port <port>` selects the UDP port (default `39000`), `--tick-rate <hz>` changes the simulation rate (default `30`), `--snapshot-rate <hz>` changes world snapshot frequency (default `15`), and `--ticks <count>` ends a diagnostic run after a fixed number of ticks.

@@ -1,6 +1,5 @@
 #include "bored/protocol.h"
 
-#include <algorithm>
 #include <stdexcept>
 
 namespace bored::protocol {
@@ -24,6 +23,10 @@ void append_u64(std::vector<std::uint8_t>& buffer, std::uint64_t value) {
     }
 }
 
+void append_i32(std::vector<std::uint8_t>& buffer, std::int32_t value) {
+    append_u32(buffer, static_cast<std::uint32_t>(value));
+}
+
 std::uint16_t read_u16(std::span<const std::uint8_t> buffer, std::size_t offset) {
     return static_cast<std::uint16_t>(buffer[offset] << 8) |
            static_cast<std::uint16_t>(buffer[offset + 1]);
@@ -45,9 +48,32 @@ std::uint64_t read_u64(std::span<const std::uint8_t> buffer, std::size_t offset)
     return value;
 }
 
+std::int32_t read_i32(std::span<const std::uint8_t> buffer, std::size_t offset) {
+    const std::uint32_t encoded_value = read_u32(buffer, offset);
+    std::int64_t signed_value = encoded_value;
+    if ((encoded_value & 0x80000000U) != 0) {
+        signed_value -= (std::int64_t{1} << 32);
+    }
+    return static_cast<std::int32_t>(signed_value);
+}
+
+bool is_valid_move_axis(std::int8_t value) {
+    return value >= -1 && value <= 1;
+}
+
+std::optional<std::int8_t> decode_move_axis(std::uint8_t value) {
+    if (value == 0xFFU) {
+        return std::int8_t{-1};
+    }
+    if (value <= 1U) {
+        return static_cast<std::int8_t>(value);
+    }
+    return std::nullopt;
+}
+
 bool is_known_message_type(std::uint8_t value) {
     return value >= static_cast<std::uint8_t>(MessageType::hello) &&
-           value <= static_cast<std::uint8_t>(MessageType::pong);
+           value <= static_cast<std::uint8_t>(MessageType::world_snapshot);
 }
 
 } // namespace
@@ -139,6 +165,38 @@ std::vector<std::uint8_t> encode_hello_ack_payload(std::uint32_t client_nonce, s
     return payload;
 }
 
+std::vector<std::uint8_t> encode_input_command_payload(const InputCommand& command) {
+    if (!is_valid_move_axis(command.move_x) || !is_valid_move_axis(command.move_y)) {
+        throw std::invalid_argument("input movement axes must be between -1 and 1");
+    }
+
+    std::vector<std::uint8_t> payload;
+    payload.reserve(k_input_command_size);
+    append_u32(payload, command.client_tick);
+    append_u32(payload, command.input_sequence);
+    payload.push_back(static_cast<std::uint8_t>(command.move_x));
+    payload.push_back(static_cast<std::uint8_t>(command.move_y));
+    return payload;
+}
+
+std::vector<std::uint8_t> encode_world_snapshot_payload(const WorldSnapshot& snapshot) {
+    if (snapshot.entities.size() > k_max_snapshot_entities) {
+        throw std::invalid_argument("world snapshot exceeds the entity limit");
+    }
+
+    std::vector<std::uint8_t> payload;
+    payload.reserve(k_world_snapshot_prefix_size + snapshot.entities.size() * k_snapshot_entity_size);
+    append_u32(payload, snapshot.server_tick);
+    append_u32(payload, snapshot.acknowledged_input_sequence);
+    append_u16(payload, static_cast<std::uint16_t>(snapshot.entities.size()));
+    for (const SnapshotEntity& entity : snapshot.entities) {
+        append_u32(payload, entity.client_id);
+        append_i32(payload, entity.position_x_mm);
+        append_i32(payload, entity.position_y_mm);
+    }
+    return payload;
+}
+
 std::optional<std::uint32_t> decode_u32_payload(std::span<const std::uint8_t> payload) {
     // Hello 的 nonce 必须恰好占 4 字节，不能接受带尾随数据的近似格式。
     if (payload.size() != 4) {
@@ -155,6 +213,50 @@ std::optional<std::uint64_t> decode_u64_payload(std::span<const std::uint8_t> pa
     }
 
     return read_u64(payload, 0);
+}
+
+std::optional<InputCommand> decode_input_command_payload(std::span<const std::uint8_t> payload) {
+    if (payload.size() != k_input_command_size) {
+        return std::nullopt;
+    }
+
+    InputCommand command;
+    command.client_tick = read_u32(payload, 0);
+    command.input_sequence = read_u32(payload, 4);
+    const auto move_x = decode_move_axis(payload[8]);
+    const auto move_y = decode_move_axis(payload[9]);
+    if (!move_x.has_value() || !move_y.has_value()) {
+        return std::nullopt;
+    }
+    command.move_x = *move_x;
+    command.move_y = *move_y;
+    return command;
+}
+
+std::optional<WorldSnapshot> decode_world_snapshot_payload(std::span<const std::uint8_t> payload) {
+    if (payload.size() < k_world_snapshot_prefix_size) {
+        return std::nullopt;
+    }
+
+    const std::uint16_t entity_count = read_u16(payload, 8);
+    if (entity_count > k_max_snapshot_entities ||
+        payload.size() != k_world_snapshot_prefix_size + entity_count * k_snapshot_entity_size) {
+        return std::nullopt;
+    }
+
+    WorldSnapshot snapshot;
+    snapshot.server_tick = read_u32(payload, 0);
+    snapshot.acknowledged_input_sequence = read_u32(payload, 4);
+    snapshot.entities.reserve(entity_count);
+    for (std::size_t index = 0; index < entity_count; ++index) {
+        const std::size_t offset = k_world_snapshot_prefix_size + index * k_snapshot_entity_size;
+        snapshot.entities.push_back({
+            .client_id = read_u32(payload, offset),
+            .position_x_mm = read_i32(payload, offset + 4),
+            .position_y_mm = read_i32(payload, offset + 8),
+        });
+    }
+    return snapshot;
 }
 
 } // namespace bored::protocol

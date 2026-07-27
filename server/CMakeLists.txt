@@ -26,6 +26,7 @@ function(bored_configure_target target_name)
 endfunction()
 
 add_library(bored_server_core
+    src/authoritative_world.cpp
     src/fixed_tick_clock.cpp
     src/protocol.cpp
     src/udp_socket.cpp
@@ -84,4 +85,17 @@ if(BUILD_TESTING)
     bored_configure_target(bored_protocol_tests)
 
     add_test(NAME protocol_tests COMMAND bored_protocol_tests)
+
+    add_executable(bored_authoritative_world_tests
+        tests/authoritative_world_test.cpp
+    )
+
+    target_link_libraries(bored_authoritative_world_tests
+        PRIVATE
+            bored_server_core
+    )
+
+    bored_configure_target(bored_authoritative_world_tests)
+
+    add_test(NAME authoritative_world_tests COMMAND bored_authoritative_world_tests)
 endif()

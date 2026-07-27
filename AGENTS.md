@@ -30,4 +30,4 @@ History currently contains one concise subject, `Initial Godot project`; continu
 
 ## Agent-Specific Instructions
 
-Keep `.godot/` caches and build output out of commits. Update `docs/project-plan.md` as milestones advance, and update `docs/networking-roadmap.md` when architecture boundaries or synchronization rules change.
+Keep `.godot/` caches and build output out of commits. Update `docs/project-plan.md` as milestones advance, and update `docs/networking-roadmap.md` when architecture boundaries or synchronization rules change. For behavior shared by the client and server, update the relevant `docs/design/` contract; byte-level protocol changes must also update `shared/protocol/` and its test vectors.

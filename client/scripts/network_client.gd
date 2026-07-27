@@ -3,16 +3,24 @@ extends Node
 
 signal status_changed(status: String)
 signal rtt_updated(rtt_ms: float)
+signal world_snapshot_received(server_tick: int, acknowledged_input_sequence: int, entities: Array)
 
 const MAGIC := 0x424F
-const VERSION := 1
+const VERSION := 2
 const HEADER_SIZE := 10
+const INPUT_COMMAND_SIZE := 10
+const WORLD_SNAPSHOT_PREFIX_SIZE := 10
+const SNAPSHOT_ENTITY_SIZE := 12
+const MAX_SNAPSHOT_ENTITIES := 98
+const INPUT_INTERVAL_SECONDS := 1.0 / 30.0
 
 enum MessageType {
 	HELLO = 1,
 	HELLO_ACK = 2,
 	PING = 3,
 	PONG = 4,
+	INPUT_COMMAND = 5,
+	WORLD_SNAPSHOT = 6,
 }
 
 @export var server_host := "127.0.0.1"
@@ -24,6 +32,11 @@ var _hello_nonce := 0
 var _client_id := 0
 var _hello_elapsed := 0.0
 var _ping_elapsed := 0.0
+var _input_elapsed := 0.0
+var _client_tick := 0
+var _input_sequence := 1
+var _move_x := 0
+var _move_y := 0
 var _handshake_complete := false
 
 
@@ -42,6 +55,15 @@ func start() -> void:
 	_send_hello()
 
 
+func set_movement(move_x: int, move_y: int) -> void:
+	_move_x = clampi(move_x, -1, 1)
+	_move_y = clampi(move_y, -1, 1)
+
+
+func get_client_id() -> int:
+	return _client_id
+
+
 func _process(delta: float) -> void:
 	_receive_packets()
 
@@ -58,6 +80,11 @@ func _process(delta: float) -> void:
 	_ping_elapsed += delta
 	if _ping_elapsed >= 1.0:
 		_send_ping()
+
+	_input_elapsed += delta
+	while _input_elapsed >= INPUT_INTERVAL_SECONDS:
+		_input_elapsed -= INPUT_INTERVAL_SECONDS
+		_send_input_command()
 
 
 func _exit_tree() -> void:
@@ -78,6 +105,17 @@ func _send_ping() -> void:
 	_send_packet(MessageType.PING, payload)
 
 
+func _send_input_command() -> void:
+	var payload := PackedByteArray()
+	_append_u32(payload, _client_tick)
+	_append_u32(payload, _input_sequence)
+	_append_i8(payload, _move_x)
+	_append_i8(payload, _move_y)
+	_client_tick += 1
+	_input_sequence += 1
+	_send_packet(MessageType.INPUT_COMMAND, payload)
+
+
 func _send_packet(message_type: MessageType, payload: PackedByteArray) -> void:
 	if payload.size() > 1_190:
 		status_changed.emit("Server: packet too large")
@@ -90,7 +128,7 @@ func _send_packet(message_type: MessageType, payload: PackedByteArray) -> void:
 	_append_u32(packet, _next_sequence)
 	_append_u16(packet, payload.size())
 	packet.append_array(payload)
-	# 上行序号只标记本客户端发送顺序；v1 不会据此重传或确认。
+	# 上行序号只标记本客户端发送顺序；v2 不会据此重传或确认。
 	_next_sequence += 1
 
 	var send_error := _socket.put_packet(packet)
@@ -122,6 +160,8 @@ func _handle_packet(packet: PackedByteArray) -> void:
 		_handle_hello_ack(packet, payload_length)
 	elif message_type == MessageType.PONG:
 		_handle_pong(packet, payload_length)
+	elif message_type == MessageType.WORLD_SNAPSHOT:
+		_handle_world_snapshot(packet, payload_length)
 
 
 func _handle_hello_ack(packet: PackedByteArray, payload_length: int) -> void:
@@ -134,6 +174,7 @@ func _handle_hello_ack(packet: PackedByteArray, payload_length: int) -> void:
 	_client_id = _read_u32(packet, HEADER_SIZE + 4)
 	_handshake_complete = true
 	_ping_elapsed = 1.0
+	_input_elapsed = INPUT_INTERVAL_SECONDS
 	status_changed.emit("Server: connected (client %d)" % _client_id)
 
 
@@ -146,6 +187,30 @@ func _handle_pong(packet: PackedByteArray, payload_length: int) -> void:
 	var rtt_ms := float(Time.get_ticks_usec() - sent_at_usec) / 1_000.0
 	if rtt_ms >= 0.0:
 		rtt_updated.emit(rtt_ms)
+
+
+func _handle_world_snapshot(packet: PackedByteArray, payload_length: int) -> void:
+	if not _handshake_complete or payload_length < WORLD_SNAPSHOT_PREFIX_SIZE:
+		return
+
+	var entity_count := _read_u16(packet, HEADER_SIZE + 8)
+	if entity_count > MAX_SNAPSHOT_ENTITIES:
+		return
+	if payload_length != WORLD_SNAPSHOT_PREFIX_SIZE + entity_count * SNAPSHOT_ENTITY_SIZE:
+		return
+
+	var server_tick := _read_u32(packet, HEADER_SIZE)
+	var acknowledged_input_sequence := _read_u32(packet, HEADER_SIZE + 4)
+	var entities: Array = []
+	for index in range(entity_count):
+		var offset := HEADER_SIZE + WORLD_SNAPSHOT_PREFIX_SIZE + index * SNAPSHOT_ENTITY_SIZE
+		entities.append({
+			"client_id": _read_u32(packet, offset),
+			"position_x_mm": _read_i32(packet, offset + 4),
+			"position_y_mm": _read_i32(packet, offset + 8),
+		})
+
+	world_snapshot_received.emit(server_tick, acknowledged_input_sequence, entities)
 
 
 # 所有多字节字段手动按大端序编码，与 C++ 端和 protocol.md 保持一致。
@@ -164,6 +229,10 @@ func _append_u64(buffer: PackedByteArray, value: int) -> void:
 		buffer.append((value >> shift) & 0xFF)
 
 
+func _append_i8(buffer: PackedByteArray, value: int) -> void:
+	buffer.append(value & 0xFF)
+
+
 func _read_u16(buffer: PackedByteArray, offset: int) -> int:
 	return (int(buffer[offset]) << 8) | int(buffer[offset + 1])
 
@@ -179,4 +248,11 @@ func _read_u64(buffer: PackedByteArray, offset: int) -> int:
 	var value := 0
 	for index in range(8):
 		value = (value << 8) | int(buffer[offset + index])
+	return value
+
+
+func _read_i32(buffer: PackedByteArray, offset: int) -> int:
+	var value := _read_u32(buffer, offset)
+	if (value & 0x80000000) != 0:
+		value -= 0x1_0000_0000
 	return value

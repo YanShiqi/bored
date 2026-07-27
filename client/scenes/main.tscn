@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3 uid="uid://0pp6l12jxklr"]
+[gd_scene load_steps=4 format=3 uid="uid://0pp6l12jxklr"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_ho6qf"]
 [ext_resource type="Script" path="res://scripts/network_client.gd" id="2_5pmhe"]
+[ext_resource type="Script" path="res://scripts/world_view.gd" id="3_gyrlw"]
 
 [node name="Main" type="Node2D" unique_id=849922611]
 script = ExtResource("1_ho6qf")
@@ -9,13 +10,16 @@ script = ExtResource("1_ho6qf")
 [node name="NetworkClient" type="Node" parent="."]
 script = ExtResource("2_5pmhe")
 
+[node name="WorldView" type="Node2D" parent="."]
+script = ExtResource("3_gyrlw")
+
 [node name="StatusLayer" type="CanvasLayer" parent="."]
 
 [node name="StatusPanel" type="PanelContainer" parent="StatusLayer"]
 offset_left = 24.0
 offset_top = 24.0
-offset_right = 336.0
-offset_bottom = 184.0
+offset_right = 360.0
+offset_bottom = 212.0
 
 [node name="MarginContainer" type="MarginContainer" parent="StatusLayer/StatusPanel"]
 theme_override_constants/margin_left = 16
@@ -36,6 +40,9 @@ text = "Server: offline"
 
 [node name="RttStatus" type="Label" parent="StatusLayer/StatusPanel/MarginContainer/StatusList"]
 text = "RTT: waiting for connection"
+
+[node name="WorldStatus" type="Label" parent="StatusLayer/StatusPanel/MarginContainer/StatusList"]
+text = "World: waiting for snapshot"
 
 [node name="SimulationStatus" type="Label" parent="StatusLayer/StatusPanel/MarginContainer/StatusList"]
 text = "Simulation: 30 Hz target"
