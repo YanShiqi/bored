@@ -2,7 +2,7 @@ extends Node2D
 
 const TARGET_TICK_RATE := 30
 
-@onready var network_client = $NetworkClient
+@onready var network_client: NetworkClient = $NetworkClient
 @onready var world_view: WorldView = $WorldView
 @onready var server_status_label: Label = $StatusLayer/StatusPanel/MarginContainer/StatusList/ServerStatus
 @onready var rtt_status_label: Label = $StatusLayer/StatusPanel/MarginContainer/StatusList/RttStatus

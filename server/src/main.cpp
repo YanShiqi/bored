@@ -90,16 +90,16 @@ public:
     }
 
 private:
-    std::uint32_t simulation_rate_ = 0;
-    std::uint32_t snapshot_rate_ = 0;
-    std::uint32_t accumulated_rate_ = 0;
+    std::uint32_t simulation_rate_ = 0; // 每秒执行的权威模拟 Tick 数，作为累积器的分母。
+    std::uint32_t snapshot_rate_ = 0;   // 每秒期望发送的快照数，每个模拟 Tick 累加一次。
+    std::uint32_t accumulated_rate_ = 0; // 尚未换算为一次快照发送机会的频率余量。
 };
 
 struct NetworkStatistics {
-    std::uint64_t accepted_input_packets = 0;
-    std::uint64_t dropped_input_packets = 0;
-    std::uint64_t snapshot_packets = 0;
-    std::uint64_t snapshot_bytes = 0;
+    std::uint64_t accepted_input_packets = 0; // 当前统计周期内被权威世界接受的输入包数量。
+    std::uint64_t dropped_input_packets = 0;  // 当前统计周期内因会话、格式或序号无效而丢弃的输入包数量。
+    std::uint64_t snapshot_packets = 0;       // 当前统计周期内成功发出的世界快照包数量。
+    std::uint64_t snapshot_bytes = 0;         // 当前统计周期内快照包的总字节数，包含协议包头。
 
     void reset() noexcept {
         *this = {};
