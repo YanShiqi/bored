@@ -3,7 +3,13 @@ extends Node
 
 signal status_changed(status: String)
 signal rtt_updated(rtt_ms: float)
-signal world_snapshot_received(server_tick: int, acknowledged_input_sequence: int, entities: Array)
+signal input_command_sent(client_tick: int, input_sequence: int, move_x: int, move_y: int)
+signal world_snapshot_received(
+	server_tick: int,
+	acknowledged_input_sequence: int,
+	entities: Array,
+	received_at_usec: int
+)
 
 const MAGIC := 0x424F
 const VERSION := 2
@@ -25,8 +31,13 @@ enum MessageType {
 
 @export var server_host := "127.0.0.1"
 @export var server_port := 39000
+@export_range(0, 2_000, 1) var simulated_latency_ms := 0
+@export_range(0, 1_000, 1) var simulated_jitter_ms := 0
+@export_range(0.0, 100.0, 0.1) var simulated_packet_loss_percent := 0.0
+@export var simulated_random_seed := 1_337
 
 var _socket := PacketPeerUDP.new()
+var _random := RandomNumberGenerator.new()
 var _next_sequence := 1
 var _hello_nonce := 0
 var _client_id := 0
@@ -39,9 +50,26 @@ var _move_x := 0
 var _move_y := 0
 var _handshake_complete := false
 
+# 网络劣化器位于协议编解码与真实 UDP 套接字之间。队列中的包仍是完整二进制数据，
+# 因此延迟、抖动、丢包和乱序会经过与真实网络相同的消息解析路径。
+var _delayed_outgoing_packets: Array[Dictionary] = []
+var _delayed_incoming_packets: Array[Dictionary] = []
+var _simulated_dropped_outgoing_packets := 0
+var _simulated_dropped_incoming_packets := 0
+
 
 func start() -> void:
 	_socket.close()
+	_delayed_outgoing_packets.clear()
+	_delayed_incoming_packets.clear()
+	_handshake_complete = false
+	_client_id = 0
+	_hello_elapsed = 0.0
+	_ping_elapsed = 0.0
+	_input_elapsed = 0.0
+	_simulated_dropped_outgoing_packets = 0
+	_simulated_dropped_incoming_packets = 0
+	_random.seed = simulated_random_seed
 	# 绑定临时本地端口；服务端根据这个端口回复同一条 UDP 会话。
 	var bind_error := _socket.bind(0)
 	if bind_error != OK:
@@ -64,8 +92,34 @@ func get_client_id() -> int:
 	return _client_id
 
 
+func configure_network_simulation(
+	latency_ms: int,
+	jitter_ms: int,
+	packet_loss_percent: float,
+	random_seed: int
+) -> void:
+	# latency 是每个方向的单程延迟；Ping 同时经过上行和下行，所以 RTT 会增加约两倍 latency。
+	simulated_latency_ms = clampi(latency_ms, 0, 2_000)
+	simulated_jitter_ms = clampi(jitter_ms, 0, 1_000)
+	simulated_packet_loss_percent = clampf(packet_loss_percent, 0.0, 100.0)
+	simulated_random_seed = random_seed
+	_random.seed = simulated_random_seed
+
+
+func get_network_simulation_summary() -> String:
+	return "Net sim: %d ms one-way, +/- %d ms, %.1f%% loss, dropped %d/%d" % [
+		simulated_latency_ms,
+		simulated_jitter_ms,
+		simulated_packet_loss_percent,
+		_simulated_dropped_outgoing_packets,
+		_simulated_dropped_incoming_packets,
+	]
+
+
 func _process(delta: float) -> void:
+	_flush_delayed_outgoing_packets()
 	_receive_packets()
+	_flush_delayed_incoming_packets()
 
 	if not _socket.is_bound():
 		return
@@ -106,20 +160,25 @@ func _send_ping() -> void:
 
 
 func _send_input_command() -> void:
+	var sent_client_tick := _client_tick
+	var sent_input_sequence := _input_sequence
 	var payload := PackedByteArray()
-	_append_u32(payload, _client_tick)
-	_append_u32(payload, _input_sequence)
+	_append_u32(payload, sent_client_tick)
+	_append_u32(payload, sent_input_sequence)
 	_append_i8(payload, _move_x)
 	_append_i8(payload, _move_y)
 	_client_tick += 1
 	_input_sequence += 1
-	_send_packet(MessageType.INPUT_COMMAND, payload)
+	if _send_packet(MessageType.INPUT_COMMAND, payload):
+		# 即使劣化器随后模拟丢包，客户端也像面对真实 UDP 一样认为发送成功并立即预测；
+		# 服务端快照中的 ack 会在之后暴露丢失并触发校正。
+		input_command_sent.emit(sent_client_tick, sent_input_sequence, _move_x, _move_y)
 
 
-func _send_packet(message_type: MessageType, payload: PackedByteArray) -> void:
+func _send_packet(message_type: MessageType, payload: PackedByteArray) -> bool:
 	if payload.size() > 1_190:
 		status_changed.emit("Server: packet too large")
-		return
+		return false
 
 	var packet := PackedByteArray()
 	_append_u16(packet, MAGIC)
@@ -131,9 +190,27 @@ func _send_packet(message_type: MessageType, payload: PackedByteArray) -> void:
 	# 上行序号只标记本客户端发送顺序；v2 不会据此重传或确认。
 	_next_sequence += 1
 
+	if _should_simulate_packet_loss():
+		_simulated_dropped_outgoing_packets += 1
+		return true
+
+	var delay_usec := _next_simulated_delay_usec()
+	if delay_usec > 0:
+		_delayed_outgoing_packets.append({
+			"deliver_at_usec": Time.get_ticks_usec() + delay_usec,
+			"packet": packet,
+		})
+		return true
+
+	return _put_packet(packet)
+
+
+func _put_packet(packet: PackedByteArray) -> bool:
 	var send_error := _socket.put_packet(packet)
 	if send_error != OK:
 		status_changed.emit("Server: send failed (%s)" % error_string(send_error))
+		return false
+	return true
 
 
 func _receive_packets() -> void:
@@ -141,10 +218,63 @@ func _receive_packets() -> void:
 		var packet := _socket.get_packet()
 		if _socket.get_packet_error() != OK:
 			continue
-		_handle_packet(packet)
+		if _should_simulate_packet_loss():
+			_simulated_dropped_incoming_packets += 1
+			continue
+
+		var delay_usec := _next_simulated_delay_usec()
+		if delay_usec > 0:
+			_delayed_incoming_packets.append({
+				"deliver_at_usec": Time.get_ticks_usec() + delay_usec,
+				"packet": packet,
+			})
+		else:
+			_handle_packet(packet, Time.get_ticks_usec())
 
 
-func _handle_packet(packet: PackedByteArray) -> void:
+func _flush_delayed_outgoing_packets() -> void:
+	var now_usec := Time.get_ticks_usec()
+	var packet_index := 0
+	while packet_index < _delayed_outgoing_packets.size():
+		var queued_packet: Dictionary = _delayed_outgoing_packets[packet_index]
+		if int(queued_packet["deliver_at_usec"]) > now_usec:
+			packet_index += 1
+			continue
+		_put_packet(queued_packet["packet"] as PackedByteArray)
+		_delayed_outgoing_packets.remove_at(packet_index)
+
+
+func _flush_delayed_incoming_packets() -> void:
+	var now_usec := Time.get_ticks_usec()
+	var packet_index := 0
+	while packet_index < _delayed_incoming_packets.size():
+		var queued_packet: Dictionary = _delayed_incoming_packets[packet_index]
+		if int(queued_packet["deliver_at_usec"]) > now_usec:
+			packet_index += 1
+			continue
+		# 使用“交付给协议层”的时间作为快照接收时间，插值缓冲才能观察到模拟抖动。
+		_handle_packet(queued_packet["packet"] as PackedByteArray, now_usec)
+		_delayed_incoming_packets.remove_at(packet_index)
+
+
+func _next_simulated_delay_usec() -> int:
+	var jitter_offset_ms := 0.0
+	if simulated_jitter_ms > 0:
+		jitter_offset_ms = _random.randf_range(
+			-float(simulated_jitter_ms),
+			float(simulated_jitter_ms)
+		)
+	var effective_delay_ms := maxf(0.0, float(simulated_latency_ms) + jitter_offset_ms)
+	return int(round(effective_delay_ms * 1_000.0))
+
+
+func _should_simulate_packet_loss() -> bool:
+	if simulated_packet_loss_percent <= 0.0:
+		return false
+	return _random.randf() * 100.0 < simulated_packet_loss_percent
+
+
+func _handle_packet(packet: PackedByteArray, received_at_usec: int) -> void:
 	if packet.size() < HEADER_SIZE:
 		return
 	if _read_u16(packet, 0) != MAGIC or packet[2] != VERSION:
@@ -161,7 +291,7 @@ func _handle_packet(packet: PackedByteArray) -> void:
 	elif message_type == MessageType.PONG:
 		_handle_pong(packet, payload_length)
 	elif message_type == MessageType.WORLD_SNAPSHOT:
-		_handle_world_snapshot(packet, payload_length)
+		_handle_world_snapshot(packet, payload_length, received_at_usec)
 
 
 func _handle_hello_ack(packet: PackedByteArray, payload_length: int) -> void:
@@ -189,7 +319,11 @@ func _handle_pong(packet: PackedByteArray, payload_length: int) -> void:
 		rtt_updated.emit(rtt_ms)
 
 
-func _handle_world_snapshot(packet: PackedByteArray, payload_length: int) -> void:
+func _handle_world_snapshot(
+	packet: PackedByteArray,
+	payload_length: int,
+	received_at_usec: int
+) -> void:
 	if not _handshake_complete or payload_length < WORLD_SNAPSHOT_PREFIX_SIZE:
 		return
 
@@ -210,7 +344,12 @@ func _handle_world_snapshot(packet: PackedByteArray, payload_length: int) -> voi
 			"position_y_mm": _read_i32(packet, offset + 8),
 		})
 
-	world_snapshot_received.emit(server_tick, acknowledged_input_sequence, entities)
+	world_snapshot_received.emit(
+		server_tick,
+		acknowledged_input_sequence,
+		entities,
+		received_at_usec
+	)
 
 
 # 所有多字节字段手动按大端序编码，与 C++ 端和 protocol.md 保持一致。
